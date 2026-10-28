@@ -90,6 +90,7 @@ function canvasToTensor(canvas){
 }
 async function aiUpscale(){
  if(!image)return;
+ showError('AI engine is not starting reliably on this device, so it cannot produce an AI-enhanced output yet. Use Quick Convert to resize and download an image now.');return;
  clearError();const btn=$('convert');btn.disabled=true;
  const oldText=btn.textContent;btn.textContent='Preparing AI…';
  try{
