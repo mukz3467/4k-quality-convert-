@@ -198,6 +198,9 @@ async function resizeBicubic(sourceCanvas,targetW,targetH,onProgress){
 }
 async function applyNaturalSharpen(canvas,onProgress,deadline){
  const w=canvas.width,h=canvas.height,pixels=w*h;
+ // A full-resolution JavaScript convolution is too expensive on mobile at 4K.
+ // Keep the exported 4K canvas intact and skip this optional pass on large outputs.
+ if(pixels>1500000){if(onProgress)onProgress('Keeping high-resolution output without the optional slow sharpening pass');return canvas;}
  if(pixels>8000000)throw Error('Output is too large for safe sharpening. Choose a smaller output size.');
  const ctx=canvas.getContext('2d',{willReadFrequently:true});
  const src=ctx.getImageData(0,0,w,h).data;
@@ -234,16 +237,16 @@ async function aiUpscale(){
   progress('Loading AI model…');
   const session=await getAiSession(progress);
   const requested=dimensions();
-  // Speed-first mode: cap final output at 8 MP and AI inference at 500k input pixels.
-  // This reduces CPU work on phones; the final canvas is resized to the requested dimensions.
+  // Cap final output at 8 MP to keep 4K UHD possible on supported devices.
+  // AI inference is separately limited below for slower phones.
   let outW=requested.w,outH=requested.h;
   if(outW*outH>8000000){
     const scale=Math.sqrt(8000000/(outW*outH));
     outW=Math.max(1,Math.floor(outW*scale));outH=Math.max(1,Math.floor(outH*scale));
   }
-  // Ultra-low CPU mode: run AI on at most 16,384 source pixels, then resize to the selected output dimensions.
-  // This heavily trades AI detail for fewer inference tiles on slower mobile CPUs.
-  const maxAiInputPixels=120000;
+  // Limit AI inference to 65,536 source pixels so slow mobile CPUs are less likely to time out,
+  // while retaining more source detail than the ultra-low 16,384-pixel setting.
+  const maxAiInputPixels=65536;
   const aiScale=Math.min(1,Math.sqrt(maxAiInputPixels/(image.naturalWidth*image.naturalHeight)));
   const inW=Math.max(1,Math.floor(image.naturalWidth*aiScale));
   const inH=Math.max(1,Math.floor(image.naturalHeight*aiScale));
