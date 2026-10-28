@@ -99,16 +99,17 @@ async function aiUpscale(){
   progress('Loading AI model…');
   const session=await getAiSession(progress);
   const requested=dimensions();
-  // Keep browser memory bounded: cap AI output at 12 MP.
+  // Speed-first mode: cap final output at 8 MP and AI inference at 500k input pixels.
+  // This reduces CPU work on phones; the final canvas is resized to the requested dimensions.
   let outW=requested.w,outH=requested.h;
-  if(outW*outH>12000000){
-    const scale=Math.sqrt(12000000/(outW*outH));
+  if(outW*outH>8000000){
+    const scale=Math.sqrt(8000000/(outW*outH));
     outW=Math.max(1,Math.floor(outW*scale));outH=Math.max(1,Math.floor(outH*scale));
   }
-  // Real-ESRGAN is 4x. Downsample the working input only as much as needed
-  // to produce the selected output dimensions and keep memory manageable.
-  const inW=Math.max(1,Math.min(image.naturalWidth,Math.floor(outW/4)));
-  const inH=Math.max(1,Math.min(image.naturalHeight,Math.floor(outH/4)));
+  const maxAiInputPixels=500000;
+  const aiScale=Math.min(1,Math.sqrt(maxAiInputPixels/(image.naturalWidth*image.naturalHeight)));
+  const inW=Math.max(1,Math.floor(image.naturalWidth*aiScale));
+  const inH=Math.max(1,Math.floor(image.naturalHeight*aiScale));
   const sourceCanvas=document.createElement('canvas');
   sourceCanvas.width=inW;sourceCanvas.height=inH;
   const sourceCtx=sourceCanvas.getContext('2d',{willReadFrequently:true});
