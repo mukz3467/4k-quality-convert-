@@ -22,7 +22,7 @@
 <div id="drop" class="drop"><div class="uploadicon">⇧</div><h3>Drop your image here</h3><p>or choose a file from your device</p><button id="choose" class="btn">＋ Choose image</button><input id="file" type="file" accept="image/jpeg,image/png,image/webp" hidden><div class="tiny">JPG, PNG or WebP · Maximum 20 MB</div></div>
 <div id="work" class="work"><div class="previews"><div class="preview"><div class="prevhead"><span>Original image</span><span id="originalDims">—</span></div><div class="stage"><img id="original" alt="Original image preview"></div><div class="filename" id="originalName"></div></div><div class="preview"><div class="prevhead"><span>Converted preview</span><span id="outputDims">Not generated</span></div><div class="stage" id="resultStage"><div class="empty">Your converted image<br>will appear here</div></div><div class="filename" id="outputName">Ready to convert</div></div></div>
 <div class="controls"><div class="field"><label for="size">Output size</label><select id="size"><option value="4k">4K target · 3840 px long edge</option><option value="2">2× original dimensions</option><option value="4">4× original dimensions</option><option value="original">Keep original size</option></select><small id="sizeNote">Keeps image proportions.</small></div><div class="field"><label for="format">Output format</label><select id="format"><option value="image/webp">WebP · smaller files</option><option value="image/jpeg">JPG · widely compatible</option><option value="image/png">PNG · lossless</option></select><small>Output is created locally.</small></div><button class="btn" id="convert">✦ AI Upscale (Free)</button></div><div class="actions"><a id="download" class="btn download" download="4k-quality-convert.webp">↓ Download converted image</a><button id="again" class="mutebtn">Choose another image</button></div></div>
-<div id="error" class="message" role="alert"></div><div class="privacy">⌑ Your selected image is processed locally in your browser; this site does not upload it.</div></section>
+<div id="progressBox" class="note" style="display:none;margin-top:14px" role="status" aria-live="polite"><div id="progressText">Preparing AI engine…</div><div style="height:8px;background:#303543;border-radius:99px;overflow:hidden;margin-top:9px"><div id="progressBar" style="height:100%;width:2%;background:var(--accent);transition:width .2s"></div></div></div><div id="error" class="message" role="alert"></div><div class="privacy">⌑ Your selected image is processed locally in your browser; this site does not upload it.</div></section>
 <div class="note"><strong>Image quality note:</strong> Resizing increases pixel dimensions but does not magically restore missing detail. AI Upscale uses a free open-source Real-ESRGAN model in your browser. The first use downloads the model; processing stays on your device. If AI cannot run on your device, no AI result will be presented as successful. 4K UHD commonly refers to 3840 × 2160 pixels for landscape displays, while this tool preserves your image’s aspect ratio.</div>
 <section id="how" class="section"><div class="kicker">THREE SIMPLE STEPS</div><h2>How to convert an image to 4K quality</h2><p>Use the online converter to create a larger image or change its file format without installing software.</p><div class="steps"><article class="step"><span class="num">01 / UPLOAD</span><h3>Choose your image</h3><p>Select a JPG, PNG, or WebP file from your phone or computer. Your original file is not changed.</p></article><article class="step"><span class="num">02 / CUSTOMIZE</span><h3>Set size and format</h3><p>Choose a 4K long-edge target, 2× or 4× resizing, or keep the original size. Then select your format.</p></article><article class="step"><span class="num">03 / DOWNLOAD</span><h3>Save the result</h3><p>Preview the converted image and download a copy in the format you selected.</p></article></div></section>
 <section class="section"><div class="kicker">BUILT FOR EVERYDAY USE</div><h2>A straightforward image converter</h2><div class="features"><article class="feature"><div class="featureicon">↗</div><h3>4K target sizing</h3><p>Resize toward a 3840-pixel long edge while preserving the image’s proportions.</p></article><article class="feature"><div class="featureicon">◈</div><h3>Popular formats</h3><p>Convert between WebP, JPG, and PNG using your browser’s built-in image tools.</p></article><article class="feature"><div class="featureicon">⌑</div><h3>Private processing</h3><p>Image conversion happens on your device, without a server upload in this version.</p></article></div></section>
@@ -34,8 +34,9 @@
 const $=id=>document.getElementById(id);let source=null,sourceUrl='',resultUrl='',image=null;
 const fileInput=$('file'),drop=$('drop'),work=$('work'),error=$('error'),reset=$('reset');
 function clearResult(){if(resultUrl){URL.revokeObjectURL(resultUrl);resultUrl=''}$('download').style.display='none';$('outputDims').textContent='Not generated';$('outputName').textContent='Ready to convert';$('resultStage').innerHTML='<div class="empty">Your converted image<br>will appear here</div>'}
-function showError(msg){error.textContent=msg;error.style.display='block'}
+function showError(msg){error.textContent=msg;error.style.display='block';$('progressBox').style.display='none'}
 function clearError(){error.textContent='';error.style.display='none'}
+function setProgress(msg,percent){$('progressBox').style.display='block';$('progressText').textContent=msg;$('progressBar').style.width=Math.max(2,Math.min(100,percent||2))+'%'}
 function loadFile(f){if(!f)return;clearError();if(!['image/jpeg','image/png','image/webp'].includes(f.type)){showError('Please choose a JPG, PNG, or WebP image.');return}if(f.size>20*1024*1024){showError('This tool supports images up to 20 MB.');return}const url=URL.createObjectURL(f),img=new Image();img.onload=()=>{if(sourceUrl)URL.revokeObjectURL(sourceUrl);source=f;sourceUrl=url;image=img;$('original').src=url;$('originalDims').textContent=img.naturalWidth.toLocaleString()+' × '+img.naturalHeight.toLocaleString();$('originalName').textContent=f.name;$('outputName').textContent='Ready to convert';drop.style.display='none';work.style.display='block';reset.hidden=false;clearResult();updateSizeNote()};img.onerror=()=>{URL.revokeObjectURL(url);showError('Could not read this image. Please try another file.')};img.src=url}
 function dimensions(){if(!image)return{w:0,h:0};let w=image.naturalWidth,h=image.naturalHeight,v=$('size').value;if(v==='original')return{w,h};if(v==='4k'){const factor=3840/Math.max(w,h);return{w:Math.max(1,Math.round(w*factor)),h:Math.max(1,Math.round(h*factor))}}const n=Number(v);return{w:Math.round(w*n),h:Math.round(h*n)}}
 function updateSizeNote(){const d=dimensions();$('sizeNote').textContent=d.w.toLocaleString()+' × '+d.h.toLocaleString()+' px estimated'}
@@ -93,7 +94,7 @@ async function aiUpscale(){
  clearError();
  const btn=$('convert'),oldText=btn.textContent;
  btn.disabled=true;
- const progress=(s)=>{btn.textContent=s};
+ const progress=(s)=>{btn.textContent=s;let p=2;if(/Downloading AI model/.test(s)){const m=s.match(/(\d+)%/);p=m?Number(m[1]):8}else if(/Starting AI engine/.test(s))p=15;else if(/AI upscaling/.test(s)){const m=s.match(/(\d+)%/);p=m?Number(m[1]):20}setProgress(s,p)};
  try{
   progress('Loading AI model…');
   const session=await getAiSession(progress);
@@ -146,7 +147,7 @@ async function aiUpscale(){
   const fmt=$('format').value;
   const blob=await new Promise(resolve=>finalCanvas.toBlob(resolve,fmt,.92));
   if(!blob)throw Error('Could not export the result. Choose JPG, PNG, or WebP and try again.');
-  clearResult();resultUrl=URL.createObjectURL(blob);
+  clearResult();setProgress('AI upscaling complete',100);resultUrl=URL.createObjectURL(blob);
   const outImg=new Image();outImg.alt='AI-upscaled image preview';outImg.src=resultUrl;
   $('resultStage').replaceChildren(outImg);
   $('outputDims').textContent=outW.toLocaleString()+' × '+outH.toLocaleString()+' px';
@@ -157,7 +158,7 @@ async function aiUpscale(){
  finally{btn.disabled=false;btn.textContent=oldText}
 }
 function startOver(){clearError();clearResult();if(sourceUrl)URL.revokeObjectURL(sourceUrl);sourceUrl='';source=null;image=null;fileInput.value='';work.style.display='none';drop.style.display='flex';reset.hidden=true}
-$('reset').addEventListener('click',startOver);$('again').addEventListener('click',()=>fileInput.click());$('year').textContent=new Date().getFullYear();
+$('convert').addEventListener('click',aiUpscale);$('reset').addEventListener('click',startOver);$('again').addEventListener('click',()=>fileInput.click());$('year').textContent=new Date().getFullYear();
 })();
 </script>
 </body></html>
