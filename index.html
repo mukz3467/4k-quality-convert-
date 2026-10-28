@@ -76,7 +76,7 @@ async function getAiSession(onProgress){
   try{
    aiSession=await Promise.race([
     ort.InferenceSession.create(modelBytes,{executionProviders:['wasm'],graphOptimizationLevel:'all'}),
-    new Promise((_,reject)=>setTimeout(()=>reject(Error('AI engine startup timed out. Refresh the page and try again; if it repeats, use Chrome and close other tabs.')),60000))
+    new Promise((_,reject)=>setTimeout(()=>reject(Error('AI engine startup exceeded 10 seconds. This device/browser cannot start the model quickly enough; try a smaller image, close other tabs, or use a faster device.')),10000))
    ]);
   }catch(e){throw Error((e&&e.message&&e.message.includes('timed out'))?e.message:'AI engine could not start: '+((e&&e.message)||'runtime initialization failed')+'. Try Chrome and close other tabs.')}
   return aiSession;
@@ -145,7 +145,7 @@ async function aiUpscale(){
  clearError();
  const btn=$('convert'),oldText=btn.textContent;
  btn.disabled=true;
- const progress=(s)=>{btn.textContent=s;let p=2;if(/Downloading AI model/.test(s)){const m=s.match(/(\d+)%/);p=m?Number(m[1]):8}else if(/Starting AI engine/.test(s))p=15;else if(/AI upscaling/.test(s)){const m=s.match(/(\d+)%/);p=m?Number(m[1]):20}setProgress(s,p)};
+ const progress=(s)=>{btn.textContent=s;let p=2;if(/Downloading AI model/.test(s)){const m=s.match(/(\d+)%/);p=m?Number(m[1]):8}else if(/Starting AI engine/.test(s))p=15;else if(/AI upscaling/.test(s)){const m=s.match(/(\d+)%/);p=20+Math.round((m?Number(m[1]):0)*.75)}else if(/Finishing/.test(s))p=96;setProgress(s,p)};
  try{
   progress('Loading AI model…');
   const session=await getAiSession(progress);
@@ -157,7 +157,9 @@ async function aiUpscale(){
     const scale=Math.sqrt(8000000/(outW*outH));
     outW=Math.max(1,Math.floor(outW*scale));outH=Math.max(1,Math.floor(outH*scale));
   }
-  const maxAiInputPixels=500000;
+  // Strict speed mode: run AI on at most 120k source pixels, then resize to the selected output dimensions.
+  // This deliberately trades some AI detail for much faster processing on mobile CPUs.
+  const maxAiInputPixels=120000;
   const aiScale=Math.min(1,Math.sqrt(maxAiInputPixels/(image.naturalWidth*image.naturalHeight)));
   const inW=Math.max(1,Math.floor(image.naturalWidth*aiScale));
   const inH=Math.max(1,Math.floor(image.naturalHeight*aiScale));
@@ -172,8 +174,10 @@ async function aiUpscale(){
   const aiCtx=aiCanvas.getContext('2d',{willReadFrequently:true});
   const tile=128,cols=Math.ceil(inW/tile),rows=Math.ceil(inH/tile),total=cols*rows;
   let done=0;
+  const processingStarted=performance.now(),processingDeadline=processingStarted+60000;
   for(let ty=0;ty<rows;ty++){
    for(let tx=0;tx<cols;tx++){
+    if(performance.now()>processingDeadline)throw Error('AI processing reached the 60-second limit. The image was not exported. Try a smaller source image or a faster device.');
     const x=tx*tile,y=ty*tile,w=Math.min(tile,inW-x),h=Math.min(tile,inH-y);
     const pixels=sourceCtx.getImageData(x,y,w,h).data,plane=w*h,arr=new Float32Array(3*plane);
     for(let i=0;i<plane;i++){arr[i]=pixels[i*4]/255;arr[plane+i]=pixels[i*4+1]/255;arr[2*plane+i]=pixels[i*4+2]/255}
@@ -197,8 +201,7 @@ async function aiUpscale(){
   finalCtx.imageSmoothingEnabled=true;finalCtx.imageSmoothingQuality='high';
   // Browser-native high-quality resampling is GPU/browser optimized; keep aspect ratio from requested dimensions.
   finalCtx.drawImage(aiCanvas,0,0,outW,outH);
-  progress('Finishing image quality…');
-  await finishImageCanvas(finalCanvas,progress);
+  // Avoid a slow per-pixel JavaScript filter on mobile; the model output is resampled by Canvas.
   const fmt=$('format').value;
   const blob=await new Promise(resolve=>finalCanvas.toBlob(resolve,fmt,.92));
   if(!blob)throw Error('Could not export the result. Choose JPG, PNG, or WebP and try again.');
