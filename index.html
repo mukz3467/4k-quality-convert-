@@ -42,14 +42,36 @@ function updateSizeNote(){const d=dimensions();$('sizeNote').textContent=d.w.toL
 $('choose').addEventListener('click',()=>fileInput.click());fileInput.addEventListener('change',e=>loadFile(e.target.files&&e.target.files[0]));drop.addEventListener('dragover',e=>{e.preventDefault();drop.classList.add('drag')});drop.addEventListener('dragleave',()=>drop.classList.remove('drag'));drop.addEventListener('drop',e=>{e.preventDefault();drop.classList.remove('drag');loadFile(e.dataTransfer.files&&e.dataTransfer.files[0])});
 $('size').addEventListener('change',()=>{clearResult();updateSizeNote()});$('format').addEventListener('change',clearResult);
 let aiSession=null,aiLoading=null;
-async function getAiSession(){
+async function getAiSession(onProgress){
  if(aiSession)return aiSession;
  if(aiLoading)return aiLoading;
  aiLoading=(async()=>{
   if(!window.ort)throw Error('AI engine failed to load. Check your internet connection and refresh.');
   ort.env.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
   const modelUrl='https://huggingface.co/skillsafe-ai/realesr-general-x4v3/resolve/main/model.onnx';
-  aiSession=await ort.InferenceSession.create(modelUrl,{executionProviders:['webgpu','wasm'],graphOptimizationLevel:'all'});
+  onProgress('Downloading AI model… 0%');
+  const controller=new AbortController();
+  const timeout=setTimeout(()=>controller.abort(),90000);
+  let response;
+  try{response=await fetch(modelUrl,{mode:'cors',signal:controller.signal,cache:'force-cache'})}
+  catch(e){if(e&&e.name==='AbortError')throw Error('AI model download timed out after 90 seconds. Check your connection and try again.');throw Error('Could not download the AI model. Check your internet connection and try again.')}
+  finally{clearTimeout(timeout)}
+  if(!response.ok)throw Error('AI model download failed (HTTP '+response.status+'). Please try again later.');
+  const total=Number(response.headers.get('content-length'))||0;
+  let bytes=0,chunks=[];
+  if(response.body&&response.body.getReader){
+   const reader=response.body.getReader();
+   while(true){
+    const part=await reader.read();if(part.done)break;
+    chunks.push(part.value);bytes+=part.value.byteLength;
+    onProgress(total?'Downloading AI model… '+Math.min(99,Math.round(bytes/total*100))+'%':'Downloading AI model… '+Math.round(bytes/1048576)+' MB');
+   }
+  }else{const ab=await response.arrayBuffer();chunks=[new Uint8Array(ab)];bytes=chunks[0].byteLength}
+  const modelBytes=new Uint8Array(bytes);let offset=0;
+  for(const chunk of chunks){modelBytes.set(chunk,offset);offset+=chunk.byteLength}
+  onProgress('Starting AI engine…');
+  try{aiSession=await ort.InferenceSession.create(modelBytes,{executionProviders:['wasm'],graphOptimizationLevel:'all'})}
+  catch(e){throw Error('AI engine could not start on this device. Try a smaller image or another browser.')}
   return aiSession;
  })();
  try{return await aiLoading}finally{aiLoading=null}
@@ -63,15 +85,15 @@ function canvasToTensor(canvas){
 async function aiUpscale(){
  if(!image)return;
  clearError();const btn=$('convert');btn.disabled=true;
- const oldText=btn.textContent;btn.textContent='Loading AI model…';
+ const oldText=btn.textContent;btn.textContent='Preparing AI…';
  try{
-  const session=await getAiSession();
+  const session=await getAiSession(status=>{btn.textContent=status});
   const sw=image.naturalWidth,sh=image.naturalHeight;
-  const scale=Math.min(1,960/Math.max(sw,sh));
+  const scale=Math.min(1,512/Math.max(sw,sh));
   const iw=Math.max(1,Math.round(sw*scale)),ih=Math.max(1,Math.round(sh*scale));
   const prep=document.createElement('canvas');prep.width=iw;prep.height=ih;
   const pctx=prep.getContext('2d',{willReadFrequently:true});pctx.imageSmoothingEnabled=true;pctx.imageSmoothingQuality='high';pctx.drawImage(image,0,0,iw,ih);
-  btn.textContent='AI enhancing image…';
+  btn.textContent='AI enhancing… this may take a little while';
   const tensor=canvasToTensor(prep);
   const inputName=session.inputNames[0];
   const outputs=await session.run({[inputName]:tensor});
