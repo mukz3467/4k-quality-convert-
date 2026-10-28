@@ -1,28 +1,22 @@
 # 4K Quality Convert
 
-A lightweight, mobile-friendly image resizer and format converter. It runs entirely in the browser and does not upload selected images to a server.
+A mobile-friendly, browser-based AI image upscaler and format converter.
 
-## Features
-- Resize an image toward a 3840-pixel long edge (4K target), or choose 2× / 4× dimensions.
-- Convert between JPG, PNG, and WebP.
-- Preview the original and converted image.
-- Download the result.
-- Responsive layout and basic SEO metadata.
-- Client-side validation for image types, file size, and very large output dimensions.
+## What it does
+- Uses ONNX Runtime Web with a Real-ESRGAN general-purpose 4× super-resolution ONNX model hosted on Hugging Face.
+- Runs image inference in the browser; the selected photo itself is not uploaded to a processing server.
+- Upscales supported JPG, PNG, and WebP images, then resamples to the selected output dimensions, including standard 4K UHD (3840 × 2160) where the source aspect ratio permits.
+- Lets users preview the original and result, choose an export format (JPG, PNG, or WebP), and download the result.
+- Includes input-size checks and output-memory limits for browser safety.
+
+## Model and limitations
+The AI model is downloaded from the public model host on first use, so a working internet connection is required. AI upscaling can estimate plausible detail, but it cannot guarantee recovery of the exact detail missing from the original. Processing speed and maximum practical image size depend on the user's device and browser memory.
 
 ## Run locally
-No build step is required. Open `index.html` in a modern browser, or serve the repository with any static file server.
+No build step is required. Open `index.html` in a modern browser or serve the repository using any static file server. Model loading requires internet access.
 
-## Publish with GitHub Pages
-1. Open this repository's **Settings → Pages**.
-2. Under **Build and deployment**, choose **Deploy from a branch**.
-3. Select branch `main` and folder `/(root)`, then save.
-4. Wait for the Pages deployment to finish and use the **Visit site** link.
-
-See the [official GitHub Pages guide](https://docs.github.com/en/pages/getting-started-with-github-pages/creating-a-github-pages-site).
-
-## Important limitation
-This tool uses browser canvas interpolation. It enlarges/resizes pixels but does not use AI to reconstruct missing image detail. Output dimensions are capped at 40 megapixels to reduce the risk of browser memory issues.
+## Deploy
+The project is a static HTML site and can be deployed on Vercel or GitHub Pages. Commit changes to the configured production branch to trigger a deployment when repository integration is enabled.
 
 ## License
 MIT
