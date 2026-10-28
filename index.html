@@ -140,6 +140,90 @@ async function finishImageCanvas(canvas,onProgress){
  return canvas;
 }
 
+
+/* Texture-preserving resize and restrained unsharp mask.
+   Bicubic is used for moderate outputs; very large 4K canvases use the browser's
+   optimized resampler to avoid huge temporary buffers on mobile devices. */
+function cubicWeight(x){
+ x=Math.abs(x);
+ if(x<=1)return 1-2.5*x*x+1.5*x*x*x;
+ if(x<2)return 2-4*x+2.5*x*x-.5*x*x*x;
+ return 0;
+}
+async function resizeBicubic(sourceCanvas,targetW,targetH,onProgress){
+ const sw=sourceCanvas.width,sh=sourceCanvas.height;
+ if(sw===targetW&&sh===targetH)return sourceCanvas;
+ // Limit temporary memory and JS work; the 4K path uses native high-quality resampling.
+ if(targetW*targetH>2500000){
+  const c=document.createElement('canvas');c.width=targetW;c.height=targetH;
+  const ctx=c.getContext('2d');ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';
+  ctx.drawImage(sourceCanvas,0,0,targetW,targetH);
+  if(onProgress)onProgress('High-quality 4K resampling complete');
+  return c;
+ }
+ const src=sourceCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,sw,sh).data;
+ const tmp=new Float32Array(targetW*sh*4);
+ const out=new Uint8ClampedArray(targetW*targetH*4);
+ // Horizontal 4-tap cubic interpolation.
+ for(let y=0;y<sh;y++){
+  for(let x=0;x<targetW;x++){
+   const pos=(x+.5)*sw/targetW-.5,base=Math.floor(pos),idx=(y*targetW+x)*4;
+   let r=0,g=0,b=0,a=0,ws=0;
+   for(let k=-1;k<=2;k++){
+    const sx=Math.max(0,Math.min(sw-1,base+k)),w=cubicWeight(pos-(base+k)),si=(y*sw+sx)*4;
+    r+=src[si]*w;g+=src[si+1]*w;b+=src[si+2]*w;a+=src[si+3]*w;ws+=w;
+   }
+   tmp[idx]=r/ws;tmp[idx+1]=g/ws;tmp[idx+2]=b/ws;tmp[idx+3]=a/ws;
+  }
+  if((y&31)===0)await new Promise(resolve=>setTimeout(resolve,0));
+ }
+ // Vertical pass writes directly to the final byte buffer.
+ for(let y=0;y<targetH;y++){
+  const pos=(y+.5)*sh/targetH-.5,base=Math.floor(pos);
+  for(let x=0;x<targetW;x++){
+   const di=(y*targetW+x)*4;let r=0,g=0,b=0,a=0,ws=0;
+   for(let k=-1;k<=2;k++){
+    const sy=Math.max(0,Math.min(sh-1,base+k)),w=cubicWeight(pos-(base+k)),si=(sy*targetW+x)*4;
+    r+=tmp[si]*w;g+=tmp[si+1]*w;b+=tmp[si+2]*w;a+=tmp[si+3]*w;ws+=w;
+   }
+   out[di]=Math.max(0,Math.min(255,r/ws));out[di+1]=Math.max(0,Math.min(255,g/ws));
+   out[di+2]=Math.max(0,Math.min(255,b/ws));out[di+3]=Math.max(0,Math.min(255,a/ws));
+  }
+  if((y&31)===0)await new Promise(resolve=>setTimeout(resolve,0));
+ }
+ const c=document.createElement('canvas');c.width=targetW;c.height=targetH;
+ c.getContext('2d').putImageData(new ImageData(out,targetW,targetH),0,0);
+ if(onProgress)onProgress('Bicubic resampling complete');
+ return c;
+}
+async function applyNaturalSharpen(canvas,onProgress,deadline){
+ const w=canvas.width,h=canvas.height,pixels=w*h;
+ if(pixels>8000000)throw Error('Output is too large for safe sharpening. Choose a smaller output size.');
+ const ctx=canvas.getContext('2d',{willReadFrequently:true});
+ const src=ctx.getImageData(0,0,w,h).data;
+ const out=new Uint8ClampedArray(src.length);
+ // Mild unsharp mask: preserve micro-texture, avoid smoothing and suppress halos around strong edges.
+ const amount=0.32, threshold=5, band=24;
+ for(let y=0;y<h;y++){
+  if(performance.now()>deadline)throw Error('Detail finishing exceeded the 60-second processing budget. Try a smaller output size.');
+  const ym=Math.max(0,y-1),yp=Math.min(h-1,y+1);
+  for(let x=0;x<w;x++){
+   const xm=Math.max(0,x-1),xp=Math.min(w-1,x+1),i=(y*w+x)*4;
+   for(let c=0;c<3;c++){
+    const blur=(src[(ym*w+xm)*4+c]+2*src[(ym*w+x)*4+c]+src[(ym*w+xp)*4+c]+
+      2*src[(y*w+xm)*4+c]+4*src[i+c]+2*src[(y*w+xp)*4+c]+
+      src[(yp*w+xm)*4+c]+2*src[(yp*w+x)*4+c]+src[(yp*w+xp)*4+c])/16;
+    const detail=src[i+c]-blur;
+    out[i+c]=Math.max(0,Math.min(255,src[i+c]+(Math.abs(detail)>threshold?detail*amount:0)));
+   }
+   out[i+3]=src[i+3];
+  }
+  if(y%band===0){if(onProgress)onProgress('Preserving fine texture… '+Math.round(y/h*100)+'%');await new Promise(resolve=>setTimeout(resolve,0))}
+ }
+ ctx.putImageData(new ImageData(out,w,h),0,0);
+ return canvas;
+}
+
 async function aiUpscale(){
  if(!image)return;
  clearError();
@@ -159,7 +243,7 @@ async function aiUpscale(){
   }
   // Ultra-low CPU mode: run AI on at most 16,384 source pixels, then resize to the selected output dimensions.
   // This heavily trades AI detail for fewer inference tiles on slower mobile CPUs.
-  const maxAiInputPixels=16384;
+  const maxAiInputPixels=120000;
   const aiScale=Math.min(1,Math.sqrt(maxAiInputPixels/(image.naturalWidth*image.naturalHeight)));
   const inW=Math.max(1,Math.floor(image.naturalWidth*aiScale));
   const inH=Math.max(1,Math.floor(image.naturalHeight*aiScale));
@@ -197,12 +281,10 @@ async function aiUpscale(){
     await new Promise(resolve=>setTimeout(resolve,0));
    }
   }
-  const finalCanvas=document.createElement('canvas');finalCanvas.width=outW;finalCanvas.height=outH;
-  const finalCtx=finalCanvas.getContext('2d');
-  finalCtx.imageSmoothingEnabled=true;finalCtx.imageSmoothingQuality='high';
-  // Browser-native high-quality resampling is GPU/browser optimized; keep aspect ratio from requested dimensions.
-  finalCtx.drawImage(aiCanvas,0,0,outW,outH);
-  // Avoid a slow per-pixel JavaScript filter on mobile; the model output is resampled by Canvas.
+  progress('Resampling while preserving texture…');
+  const finalCanvas=await resizeBicubic(aiCanvas,outW,outH,progress);
+  // Use restrained edge sharpening only; no denoising blur or shadow lift is applied.
+  await applyNaturalSharpen(finalCanvas,progress,processingDeadline);
   const fmt=$('format').value;
   const blob=await new Promise(resolve=>finalCanvas.toBlob(resolve,fmt,.92));
   if(!blob)throw Error('Could not export the result. Choose JPG, PNG, or WebP and try again.');
