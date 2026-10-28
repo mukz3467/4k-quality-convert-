@@ -237,16 +237,18 @@ async function aiUpscale(){
   progress('Loading AI model…');
   const session=await getAiSession(progress);
   const requested=dimensions();
-  // Cap final output at 8 MP to keep 4K UHD possible on supported devices.
-  // AI inference is separately limited below for slower phones.
+  // Preserve standard 4K UHD (3840 × 2160 = 8.29 MP) on supported devices.
+  // Larger requests are capped to a memory-conscious 8.5 MP output.
   let outW=requested.w,outH=requested.h;
-  if(outW*outH>8000000){
-    const scale=Math.sqrt(8000000/(outW*outH));
+  if(outW*outH>8500000){
+    const scale=Math.sqrt(8500000/(outW*outH));
     outW=Math.max(1,Math.floor(outW*scale));outH=Math.max(1,Math.floor(outH*scale));
   }
-  // Limit AI inference to 65,536 source pixels so slow mobile CPUs are less likely to time out,
-  // while retaining more source detail than the ultra-low 16,384-pixel setting.
-  const maxAiInputPixels=65536;
+  // Run the real 4× AI model on up to 750,000 source pixels rather than shrinking
+  // every image to a tiny thumbnail. This allows a landscape source around 1024 × 576
+  // to produce native 4K UHD detail before final aspect-ratio-preserving resampling.
+  // Very large inputs are still reduced to keep browser memory use manageable.
+  const maxAiInputPixels=750000;
   const aiScale=Math.min(1,Math.sqrt(maxAiInputPixels/(image.naturalWidth*image.naturalHeight)));
   const inW=Math.max(1,Math.floor(image.naturalWidth*aiScale));
   const inH=Math.max(1,Math.floor(image.naturalHeight*aiScale));
