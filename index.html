@@ -47,7 +47,8 @@ async function getAiSession(onProgress){
  if(aiLoading)return aiLoading;
  aiLoading=(async()=>{
   if(!window.ort)throw Error('AI engine failed to load. Check your internet connection and refresh.');
-  ort.env.wasm.wasmPaths='https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/';
+  ort.env.wasm.wasmPaths={wasm:'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort-wasm-simd-threaded.wasm'};
+  ort.env.wasm.numThreads=1;
   const modelUrl='https://huggingface.co/skillsafe-ai/realesr-general-x4v3/resolve/main/model.onnx';
   onProgress('Downloading AI model… 0%');
   const controller=new AbortController();
@@ -70,8 +71,12 @@ async function getAiSession(onProgress){
   const modelBytes=new Uint8Array(bytes);let offset=0;
   for(const chunk of chunks){modelBytes.set(chunk,offset);offset+=chunk.byteLength}
   onProgress('Starting AI engine…');
-  try{aiSession=await ort.InferenceSession.create(modelBytes,{executionProviders:['wasm'],graphOptimizationLevel:'all'})}
-  catch(e){throw Error('AI engine could not start on this device. Try a smaller image or another browser.')}
+  try{
+   aiSession=await Promise.race([
+    ort.InferenceSession.create(modelBytes,{executionProviders:['wasm'],graphOptimizationLevel:'all'}),
+    new Promise((_,reject)=>setTimeout(()=>reject(Error('AI engine startup timed out. Refresh the page and try again; if it repeats, use Chrome and close other tabs.')),60000))
+   ]);
+  }catch(e){throw Error((e&&e.message&&e.message.includes('timed out'))?e.message:'AI engine could not start: '+((e&&e.message)||'runtime initialization failed')+'. Try Chrome and close other tabs.')}
   return aiSession;
  })();
  try{return await aiLoading}finally{aiLoading=null}
